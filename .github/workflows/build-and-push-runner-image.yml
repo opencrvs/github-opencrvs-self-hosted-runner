@@ -3,10 +3,6 @@ name: Build and Push Runner Image
 on:
   push:
     branches: ["*"]
-    paths:
-      - .github/workflows/build-and-push-runner-image.yml
-      - github-runner/Dockerfile  # Trigger when Dockerfile changes
-      - github-runner/**   # Optional: if your Docker context is in a folder
 
 jobs:
   build-and-push:
@@ -32,7 +28,7 @@ jobs:
         run: |
           COMMIT_HASH=$(echo ${{ github.sha }} | cut -c1-7)
           echo "image_tag=${COMMIT_HASH}" >> $GITHUB_ENV
-          docker build -t ${{ env.image_path }}:${COMMIT_HASH} -f github-runner/Dockerfile github-runner/
+          docker build -t ${{ env.image_path }}:${COMMIT_HASH} -f Dockerfile .
 
       - name: Push Docker image
         run: |
