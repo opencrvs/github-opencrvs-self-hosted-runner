@@ -3,6 +3,7 @@ name: Build and Push Runner Image
 on:
   push:
     branches: ["*"]
+    tags: ["*"]
 
 jobs:
   build-and-push:
@@ -23,12 +24,18 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PUBLISH_TOKEN }}
-
+      - name:
+        run: |
+          if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
+            TAG_NAME="${GITHUB_REF#refs/tags/}"
+            echo "image_tag=${TAG_NAME}" >> $GITHUB_ENV
+          else
+            COMMIT_HASH=$(echo "${GITHUB_SHA}" | cut -c1-7)
+            echo "image_tag=${COMMIT_HASH}" >> $GITHUB_ENV
+          fi
       - name: Build Docker image
         run: |
-          COMMIT_HASH=$(echo ${{ github.sha }} | cut -c1-7)
-          echo "image_tag=${COMMIT_HASH}" >> $GITHUB_ENV
-          docker build -t ${{ env.image_path }}:${COMMIT_HASH} -f Dockerfile .
+          docker build -t ${{ env.image_path }}:${{ env.image_tag }} -f Dockerfile .
 
       - name: Push Docker image
         run: |
