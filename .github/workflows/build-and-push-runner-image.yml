@@ -59,7 +59,7 @@ jobs:
       stern_version: ${{ inputs.stern_version || github.event.client_payload.stern_version }}
     steps:
       - name: Checkout code
-        uses: actions/checkout@v6
+        uses: actions/checkout@v7
         with:
           ref: ${{ inputs.branch_tag_name || github.event.client_payload.branch_tag_name || github.ref }}
 
