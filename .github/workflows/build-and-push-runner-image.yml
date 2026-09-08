@@ -4,6 +4,28 @@ on:
   push:
     branches: ["*"]
     tags: ["*"]
+  schedule:
+    # Rebuild weekly so the base image and OS packages get refreshed even when
+    # nothing in this repo changes.
+    - cron: "0 3 * * 1"
+  workflow_dispatch:
+    inputs:
+      kubectl_version:
+        description: "kubectl version to bake in (e.g. v1.36.0). Blank uses the Dockerfile default."
+        required: false
+        type: string
+      helm_version:
+        description: "Helm version to bake in (e.g. v3.21.3). Blank uses the Dockerfile default."
+        required: false
+        type: string
+  repository_dispatch:
+    # Triggered by the infrastructure repo (opencrvs/infrastructure) when it
+    # bumps kubernetes_version/helm_version in group_vars/all.yml, e.g.:
+    #   gh api repos/opencrvs/github-opencrvs-self-hosted-runner/dispatches \
+    #     -f event_type=rebuild \
+    #     -F 'client_payload[kubectl_version]=v1.36.0' \
+    #     -F 'client_payload[helm_version]=v3.21.3'
+    types: [rebuild]
 
 jobs:
   build-and-push:
@@ -14,6 +36,8 @@ jobs:
       packages: write
     env:
       image_path: ghcr.io/opencrvs/opencrvs-github-runner
+      kubectl_version: ${{ inputs.kubectl_version || github.event.client_payload.kubectl_version }}
+      helm_version: ${{ inputs.helm_version || github.event.client_payload.helm_version }}
     steps:
       - name: Checkout code
         uses: actions/checkout@v6
@@ -24,18 +48,24 @@ jobs:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GHCR_PUBLISH_TOKEN }}
-      - name:
+
+      - name: Determine image tag
         run: |
           if [[ "${GITHUB_REF}" == refs/tags/* ]]; then
             TAG_NAME="${GITHUB_REF#refs/tags/}"
-            echo "image_tag=${TAG_NAME}" >> $GITHUB_ENV
+          elif [[ -n "${kubectl_version}" || -n "${helm_version}" ]]; then
+            TAG_NAME="k8s-${kubectl_version:-default}-helm-${helm_version:-default}"
           else
-            COMMIT_HASH=$(echo "${GITHUB_SHA}" | cut -c1-7)
-            echo "image_tag=${COMMIT_HASH}" >> $GITHUB_ENV
+            TAG_NAME=$(echo "${GITHUB_SHA}" | cut -c1-7)
           fi
+          echo "image_tag=${TAG_NAME}" >> $GITHUB_ENV
+
       - name: Build Docker image
         run: |
-          docker build -t ${{ env.image_path }}:${{ env.image_tag }} -f Dockerfile .
+          BUILD_ARGS=()
+          [[ -n "${kubectl_version}" ]] && BUILD_ARGS+=(--build-arg "KUBECTL_VERSION=${kubectl_version}")
+          [[ -n "${helm_version}" ]] && BUILD_ARGS+=(--build-arg "HELM_VERSION=${helm_version}")
+          docker build "${BUILD_ARGS[@]}" -t ${{ env.image_path }}:${{ env.image_tag }} -f Dockerfile .
 
       - name: Push Docker image
         run: |
