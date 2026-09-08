@@ -43,15 +43,18 @@ from the [`Dockerfile`](Dockerfile), which bakes in `kubectl` and `helm` at
 versions controlled by the `KUBECTL_VERSION`/`HELM_VERSION` build args.
 
 The workflow runs on:
-- **Push** to any branch/tag in this repo (tags produce a matching image tag; other pushes produce a short-commit-hash tag).
+- **Push** to any branch/tag in this repo.
 - **Weekly schedule** (Mondays 03:00 UTC), so the base image and OS packages get refreshed even without a code change here.
-- **Manual dispatch**, optionally overriding `kubectl_version`/`helm_version` for that build.
-- **`repository_dispatch` (type `rebuild`)**, so another repository can trigger a rebuild with specific versions, e.g. from `opencrvs/infrastructure` whenever it bumps `kubernetes_version`/`helm_version` in `group_vars/all.yml`:
+- **Manual dispatch**, building from any `branch_tag_name` (default `main`), optionally overriding `kubectl_version`/`helm_version` for that build — mirrors the "Publish images from any branch or tag" pattern used in `opencrvs-core`'s [`build-images-from-branch.yml`](https://github.com/opencrvs/opencrvs-core/blob/develop/.github/workflows/build-images-from-branch.yml).
+- **`repository_dispatch` (type `rebuild`)**, so another repository can trigger a rebuild with specific branch/versions, e.g. from `opencrvs/infrastructure` whenever it bumps `kubernetes_version`/`helm_version` in `group_vars/all.yml`:
   ```
   gh api repos/opencrvs/github-opencrvs-self-hosted-runner/dispatches \
     -f event_type=rebuild \
+    -F 'client_payload[branch_tag_name]=main' \
     -F 'client_payload[kubectl_version]=v1.36.0' \
     -F 'client_payload[helm_version]=v3.21.3'
   ```
 
-Every successful build also retags and pushes `:latest`.
+Every build pushes two tags — the short commit SHA of the checked-out ref
+(`version`) and the escaped branch/tag name (`branch`) — plus retags and pushes
+`:latest`.
