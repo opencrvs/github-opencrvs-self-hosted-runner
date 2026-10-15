@@ -1,4 +1,8 @@
-FROM summerwind/actions-runner
+# Runner base image:
+#   ghcr.io/actions/actions-runner - official image, used by gha-runner-scale-set (ephemeral runners)
+#   summerwind/actions-runner      - legacy summerwind actions-runner-controller
+ARG BASE_IMAGE=ghcr.io/actions/actions-runner
+FROM ${BASE_IMAGE}
 USER root
 # Override at build time with --build-arg to align this image with the
 # kubernetes_version / helm_version pinned in the infrastructure repo's
