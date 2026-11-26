@@ -55,9 +55,9 @@ docker build --build-arg BASE_IMAGE=ghcr.io/actions/actions-runner -t opencrvs-g
 ```
 
 The workflow runs on:
-- **Push** to any branch/tag in this repo.
-- **Weekly schedule** (Mondays 03:00 UTC), so the base image and OS packages get refreshed even without a code change here.
-- **Manual dispatch**, building from any `branch_tag_name` (default `develop`), optionally overriding `kubectl_version`/`helm_version` for that build — mirrors the "Publish images from any branch or tag" pattern used in `opencrvs-core`'s [`build-images-from-branch.yml`](https://github.com/opencrvs/opencrvs-core/blob/develop/.github/workflows/build-images-from-branch.yml).
+- **Push** to `develop`, or of a `v*` tag.
+- **Weekly schedule** (Mondays 03:00 UTC) rebuilds `develop` and the 5 newest `v*` tags (by version), so the base image and OS packages get refreshed even without a code change here.
+- **Manual dispatch** started from `develop`, building from any `branch_tag_name` (default `develop`), optionally overriding `kubectl_version`/`helm_version` for that build — mirrors the "Publish images from any branch or tag" pattern used in `opencrvs-core`'s [`build-images-from-branch.yml`](https://github.com/opencrvs/opencrvs-core/blob/develop/.github/workflows/build-images-from-branch.yml).
 - **`repository_dispatch` (type `rebuild`)**, so another repository can trigger a rebuild with specific branch/versions, e.g. from `opencrvs/infrastructure` whenever it bumps `kubernetes_version`/`helm_version` in `group_vars/all.yml`:
   ```
   gh api repos/opencrvs/github-opencrvs-self-hosted-runner/dispatches \
@@ -76,3 +76,15 @@ dispatches that build `develop`. Builds from any other branch or tag are publish
 their version and branch tags only, which is how to test a branch on a cluster without
 affecting the runners that follow `latest`, e.g. `arc_scale_set_runner_version: <branch>`
 in the infrastructure repo.
+
+## Publishing
+
+Images are published by runs on `develop` and on `v*` tags only: pushes, the weekly schedule and dispatches started
+from `develop`. The job uses the `publish` environment, which holds the registry token `GHCR_PUBLISH_TOKEN` and is
+limited to the `develop` branch and `v*` tags in the repository settings, so runs from any other branch do not get the
+token. A run on a tag uses the workflow file of the tagged commit, so creating `v*` tags is restricted by a tag ruleset.
+
+To publish a test image of another branch or a tag, run the workflow from `develop` and name it:
+```
+gh workflow run build-and-push-runner-image.yml --ref develop -f branch_tag_name=<branch or tag>
+```
