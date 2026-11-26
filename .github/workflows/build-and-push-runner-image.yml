@@ -1,10 +1,10 @@
 name: Build and Push Runner Image
 run-name: Build runner image from ${{ inputs.branch_tag_name || github.ref_name }}
 
+# Images are published from the develop branch only, see "Publishing" in README.md
 on:
   push:
-    branches: ["*"]
-    tags: ["*"]
+    branches: [develop]
   schedule:
     # Rebuild weekly so the base image and OS packages get refreshed even when
     # nothing in this repo changes.
@@ -12,7 +12,7 @@ on:
   workflow_dispatch:
     inputs:
       branch_tag_name:
-        description: "Branch (or tag) to build from"
+        description: "Branch (or tag) to build from. Run the workflow from develop, other branches cannot publish"
         default: develop
         required: true
         type: string
@@ -48,6 +48,8 @@ jobs:
   build-and-push:
     name: Build ${{ matrix.repository }}
     runs-on: ubuntu-26.04
+    # The registry token is a secret of this environment, which is limited to runs on develop
+    environment: publish
 
     strategy:
       # Both images are published independently, one failing must not cancel the other.
