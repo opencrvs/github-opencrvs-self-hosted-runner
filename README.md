@@ -37,24 +37,42 @@ Check you repository configuration -> action runners
 
 # Image build & rebuild strategy
 
-The runner image (`ghcr.io/opencrvs/opencrvs-github-runner`) is built by
+The runner images are built by
 [`.github/workflows/build-and-push-runner-image.yml`](.github/workflows/build-and-push-runner-image.yml)
-from the [`Dockerfile`](Dockerfile), which bakes in `kubectl` and `helm` at
-versions controlled by the `KUBECTL_VERSION`/`HELM_VERSION` build args.
+from the same [`Dockerfile`](Dockerfile), which bakes in `kubectl`, `helm`, `yq` and `stern` at
+versions controlled by the `KUBECTL_VERSION`/`HELM_VERSION`/`YQ_VERSION`/`STERN_VERSION` build args.
+
+The workflow builds a matrix of two images that differ only by the `BASE_IMAGE` build arg:
+
+| Image (`repository`) | `BASE_IMAGE` | Used by |
+|---|---|---|
+| `ghcr.io/opencrvs/opencrvs-github-ephemeral-runner` | `ghcr.io/actions/actions-runner` | `gha-runner-scale-set` (ephemeral runners), `arc_mode: scale-set` in the infrastructure repo |
+| `ghcr.io/opencrvs/opencrvs-github-runner` | `summerwind/actions-runner` | legacy `summerwind` actions-runner-controller, `arc_mode: legacy`. Deprecated, removed together with legacy runner support (after v2.4) |
+
+To build one of them locally:
+```
+docker build --build-arg BASE_IMAGE=ghcr.io/actions/actions-runner -t opencrvs-github-ephemeral-runner .
+```
 
 The workflow runs on:
 - **Push** to any branch/tag in this repo.
 - **Weekly schedule** (Mondays 03:00 UTC), so the base image and OS packages get refreshed even without a code change here.
-- **Manual dispatch**, building from any `branch_tag_name` (default `main`), optionally overriding `kubectl_version`/`helm_version` for that build — mirrors the "Publish images from any branch or tag" pattern used in `opencrvs-core`'s [`build-images-from-branch.yml`](https://github.com/opencrvs/opencrvs-core/blob/develop/.github/workflows/build-images-from-branch.yml).
+- **Manual dispatch**, building from any `branch_tag_name` (default `develop`), optionally overriding `kubectl_version`/`helm_version` for that build — mirrors the "Publish images from any branch or tag" pattern used in `opencrvs-core`'s [`build-images-from-branch.yml`](https://github.com/opencrvs/opencrvs-core/blob/develop/.github/workflows/build-images-from-branch.yml).
 - **`repository_dispatch` (type `rebuild`)**, so another repository can trigger a rebuild with specific branch/versions, e.g. from `opencrvs/infrastructure` whenever it bumps `kubernetes_version`/`helm_version` in `group_vars/all.yml`:
   ```
   gh api repos/opencrvs/github-opencrvs-self-hosted-runner/dispatches \
     -f event_type=rebuild \
-    -F 'client_payload[branch_tag_name]=main' \
+    -F 'client_payload[branch_tag_name]=develop' \
     -F 'client_payload[kubectl_version]=v1.36.0' \
     -F 'client_payload[helm_version]=v3.21.3'
   ```
 
-Every build pushes two tags — the short commit SHA of the checked-out ref
-(`version`) and the escaped branch/tag name (`branch`) — plus retags and pushes
-`:latest`.
+Every build pushes two tags per image — the short commit SHA of the checked-out ref
+(`version`) and the escaped branch/tag name (`branch`).
+
+`:latest` is what the runners pull, so it is only pushed when the built ref is the
+repository's default branch (`develop`): pushes to `develop`, the weekly schedule, and
+dispatches that build `develop`. Builds from any other branch or tag are published under
+their version and branch tags only, which is how to test a branch on a cluster without
+affecting the runners that follow `latest`, e.g. `arc_scale_set_runner_version: <branch>`
+in the infrastructure repo.

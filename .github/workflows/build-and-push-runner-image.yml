@@ -37,7 +37,7 @@ on:
     # bumps kubernetes_version/helm_version in group_vars/all.yml, e.g.:
     #   gh api repos/opencrvs/github-opencrvs-self-hosted-runner/dispatches \
     #     -f event_type=rebuild \
-    #     -F 'client_payload[branch_tag_name]=main' \
+    #     -F 'client_payload[branch_tag_name]=develop' \
     #     -F 'client_payload[kubectl_version]=1.36.0' \
     #     -F 'client_payload[helm_version]=3.21.3' \
     #     -F 'client_payload[yq_version]=4.53.6' \
@@ -46,13 +46,30 @@ on:
 
 jobs:
   build-and-push:
+    name: Build ${{ matrix.repository }}
     runs-on: ubuntu-26.04
+
+    strategy:
+      # Both images are published independently, one failing must not cancel the other.
+      fail-fast: false
+      matrix:
+        include:
+          # Ephemeral runners: gha-runner-scale-set (infrastructure arc_mode: scale-set)
+          - base_image: ghcr.io/actions/actions-runner
+            repository: ghcr.io/opencrvs/opencrvs-github-ephemeral-runner
+          # Legacy summerwind runners (infrastructure arc_mode: legacy)
+          # FIXME: Remove together with legacy runner support in the infrastructure repo (after v2.4)
+          - base_image: summerwind/actions-runner
+            repository: ghcr.io/opencrvs/opencrvs-github-runner
 
     permissions:
       contents: read
       packages: write
     env:
-      image_path: ghcr.io/opencrvs/opencrvs-github-runner
+      base_image: ${{ matrix.base_image }}
+      image_path: ${{ matrix.repository }}
+      BRANCH: ${{ inputs.branch_tag_name || github.event.client_payload.branch_tag_name || github.ref_name }}
+      DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'develop' }}
       kubectl_version: ${{ inputs.kubectl_version || github.event.client_payload.kubectl_version }}
       helm_version: ${{ inputs.helm_version || github.event.client_payload.helm_version }}
       yq_version: ${{ inputs.yq_version || github.event.client_payload.yq_version }}
@@ -72,8 +89,6 @@ jobs:
 
       - name: Determine image tags
         id: tags
-        env:
-          BRANCH: ${{ inputs.branch_tag_name || github.event.client_payload.branch_tag_name || github.ref_name }}
         run: |
           VERSION=$(git rev-parse HEAD | cut -c1-7)
           echo "Pushing version $VERSION"
@@ -85,7 +100,7 @@ jobs:
 
       - name: Build Docker image
         run: |
-          BUILD_ARGS=()
+          BUILD_ARGS=(--build-arg "BASE_IMAGE=${base_image}")
           [[ -n "${kubectl_version}" ]] && BUILD_ARGS+=(--build-arg "KUBECTL_VERSION=${kubectl_version}")
           [[ -n "${helm_version}" ]] && BUILD_ARGS+=(--build-arg "HELM_VERSION=${helm_version}")
           [[ -n "${yq_version}" ]] && BUILD_ARGS+=(--build-arg "YQ_VERSION=${yq_version}")
@@ -98,6 +113,8 @@ jobs:
       - name: Write workflow summary
         run: |
           IMG="${{ env.image_path }}:${{ steps.tags.outputs.version }}"
+          TAGS="\`${{ steps.tags.outputs.branch }}\`"
+          [[ "$BRANCH" == "$DEFAULT_BRANCH" ]] && TAGS="${TAGS} and \`latest\`"
 
           KUBECTL_V=$(docker run --rm --entrypoint kubectl "$IMG" version --client 2>/dev/null | head -1)
           HELM_V=$(docker run --rm --entrypoint helm "$IMG" version --short 2>/dev/null)
@@ -107,7 +124,9 @@ jobs:
           {
             echo "## Runner image versions"
             echo ""
-            echo "Image: \`$IMG\` (also tagged \`${{ steps.tags.outputs.branch }}\` and \`latest\`)"
+            echo "Image: \`$IMG\` (also tagged ${TAGS})"
+            echo ""
+            echo "Base image: \`${base_image}\`"
             echo ""
             echo "| Tool | Version |"
             echo "|---|---|"
@@ -121,5 +140,7 @@ jobs:
         run: |
           docker push ${{ env.image_path }}:${{ steps.tags.outputs.version }}
           docker push ${{ env.image_path }}:${{ steps.tags.outputs.branch }}
-          docker tag ${{ env.image_path }}:${{ steps.tags.outputs.version }} ${{ env.image_path }}:latest
-          docker push ${{ env.image_path }}:latest
+          if [[ "$BRANCH" == "$DEFAULT_BRANCH" ]]; then
+            docker tag ${{ env.image_path }}:${{ steps.tags.outputs.version }} ${{ env.image_path }}:latest
+            docker push ${{ env.image_path }}:latest
+          fi
