@@ -1,13 +1,14 @@
 name: Build and Push Runner Image
 run-name: Build runner image from ${{ inputs.branch_tag_name || github.ref_name }}
 
-# Images are published from the develop branch only, see "Publishing" in README.md
+# Images are published from the develop branch and from v* tags only, see "Publishing" in README.md
 on:
   push:
     branches: [develop]
+    tags: ["v*"]
   schedule:
-    # Rebuild weekly so the base image and OS packages get refreshed even when
-    # nothing in this repo changes.
+    # Rebuild weekly (develop and the 5 newest v* tags) so the base image and OS packages
+    # get refreshed even when nothing in this repo changes.
     - cron: "0 3 * * 1"
   workflow_dispatch:
     inputs:
@@ -45,23 +46,58 @@ on:
     types: [rebuild]
 
 jobs:
-  build-and-push:
-    name: Build ${{ matrix.repository }}
+  # The branches and tags to build: the pushed or requested one, and on the weekly schedule
+  # develop and the 5 newest v* tags.
+  refs:
+    name: Select refs to build
     runs-on: ubuntu-26.04
-    # The registry token is a secret of this environment, which is limited to runs on develop
+    permissions:
+      contents: read
+    outputs:
+      refs: ${{ steps.refs.outputs.refs }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v7
+        with:
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: List refs
+        id: refs
+        env:
+          REQUESTED_REF: ${{ inputs.branch_tag_name || github.event.client_payload.branch_tag_name || github.ref_name }}
+        run: |
+          if [[ "${GITHUB_EVENT_NAME}" == "schedule" ]]; then
+            # Newest first by version, a suffix like -rc1 sorts before the release it belongs to
+            refs=$({ echo develop; git -c versionsort.suffix=- tag --list 'v*' --sort=-v:refname | head -n 5; } | jq -R . | jq -sc .)
+          else
+            refs=$(jq -nc --arg ref "${REQUESTED_REF}" '[$ref]')
+          fi
+          echo "refs=${refs}" >> "$GITHUB_OUTPUT"
+          echo "Refs to build: ${refs}"
+
+  build-and-push:
+    name: Build ${{ matrix.repository }} from ${{ matrix.ref }}
+    needs: refs
+    runs-on: ubuntu-26.04
+    # The registry token is a secret of this environment, which is limited to runs on develop and v* tags
     environment: publish
 
     strategy:
-      # Both images are published independently, one failing must not cancel the other.
+      # Every image and ref is published independently, one failing must not cancel the others.
       fail-fast: false
       matrix:
+        ref: ${{ fromJSON(needs.refs.outputs.refs) }}
+        image: [ephemeral, legacy]
         include:
           # Ephemeral runners: gha-runner-scale-set (infrastructure arc_mode: scale-set)
-          - base_image: ghcr.io/actions/actions-runner
+          - image: ephemeral
+            base_image: ghcr.io/actions/actions-runner
             repository: ghcr.io/opencrvs/opencrvs-github-ephemeral-runner
           # Legacy summerwind runners (infrastructure arc_mode: legacy)
           # FIXME: Remove together with legacy runner support in the infrastructure repo (after v2.4)
-          - base_image: summerwind/actions-runner
+          - image: legacy
+            base_image: summerwind/actions-runner
             repository: ghcr.io/opencrvs/opencrvs-github-runner
 
     permissions:
@@ -70,7 +106,7 @@ jobs:
     env:
       base_image: ${{ matrix.base_image }}
       image_path: ${{ matrix.repository }}
-      BRANCH: ${{ inputs.branch_tag_name || github.event.client_payload.branch_tag_name || github.ref_name }}
+      BRANCH: ${{ matrix.ref }}
       DEFAULT_BRANCH: ${{ github.event.repository.default_branch || 'develop' }}
       kubectl_version: ${{ inputs.kubectl_version || github.event.client_payload.kubectl_version }}
       helm_version: ${{ inputs.helm_version || github.event.client_payload.helm_version }}
@@ -80,7 +116,7 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v7
         with:
-          ref: ${{ inputs.branch_tag_name || github.event.client_payload.branch_tag_name || github.ref }}
+          ref: ${{ matrix.ref }}
 
       - name: Log in to GitHub Container Registry
         uses: docker/login-action@v4
