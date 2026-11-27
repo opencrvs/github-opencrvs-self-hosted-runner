@@ -1,0 +1,19 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": ["config:recommended", ":semanticCommits", "customManagers:dockerfileVersions"],
+  "packageRules": [
+    {
+      "description": "One runner image serves clusters on different Kubernetes versions, and kubectl supports a difference of one minor version to the cluster, so patch updates get their own PR",
+      "matchDepNames": ["kubernetes/kubernetes"],
+      "separateMinorPatch": true,
+      "prBodyNotes": [
+        "kubectl is shared by all clusters that use this image and supports a difference of one minor version to the API server. Merge a new minor version only when every cluster runs that minor version, one lower or one higher (`kubernetes_version` in `group_vars/all.yml` of the infrastructure repo)."
+      ]
+    },
+    {
+      "description": "Helm 4 is not yet supported, same as helm_version in the infrastructure repo",
+      "matchDepNames": ["helm/helm"],
+      "allowedVersions": "/^3\\./"
+    }
+  ]
+}

@@ -7,9 +7,14 @@ USER root
 # Override at build time with --build-arg to align this image with the
 # kubernetes_version / helm_version pinned in the infrastructure repo's
 # group_vars/all.yml.
+# The "renovate:" comments let Renovate update the defaults, see renovate.json.
+# renovate: datasource=github-releases depName=kubernetes/kubernetes extractVersion=^v(?<version>.+)$
 ARG KUBECTL_VERSION=1.36.0
+# renovate: datasource=github-releases depName=helm/helm extractVersion=^v(?<version>.+)$
 ARG HELM_VERSION=3.21.3
+# renovate: datasource=github-releases depName=mikefarah/yq extractVersion=^v(?<version>.+)$
 ARG YQ_VERSION=4.53.6
+# renovate: datasource=github-releases depName=stern/stern extractVersion=^v(?<version>.+)$
 ARG STERN_VERSION=1.34.0
 RUN apt-get update && apt-get upgrade -y && apt-get install -y curl unzip gnupg
 RUN curl -LO "https://dl.k8s.io/release/v${KUBECTL_VERSION}/bin/linux/amd64/kubectl" \
